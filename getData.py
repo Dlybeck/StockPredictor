@@ -18,7 +18,7 @@ def get_company_history(symbol):
     data = data.to_dict(orient='index')
     
     # Put recent ones on top of json
-    data = OrderedDict(reversed(list(data.items())))
+    data = OrderedDict(list(data.items()))
     
     for k, v in data.items():
         v["Change"] = round((v["Close"] - v["Open"]) / v["Close"], 3)
@@ -32,7 +32,7 @@ def get_company_basics(symbol):
     all_data = {}
 
     # Remove unwanted info
-    to_keep = {'symbol', 'longName', 'state', 'industry', 'sector', 'currency'}
+    to_keep = {'symbol', 'longName'}
     for key in info:
         if key in to_keep:
             all_data[key] = info[key]
@@ -41,62 +41,54 @@ def get_company_basics(symbol):
     
     return data
 
-def convert_to_usd(data, currency):
-    if currency == 'USD':
-        return data
-    
-    exchange_rates = []
-    for date in data.index:
-        try:
-            rate = currency_converter.get_rate(currency, 'USD', date)
-        except Exception as e:
-            print(f"Could not fetch exchange rate for {date}: {e}")
-            rate = currency_converter.get_rate(currency, 'USD')
-        exchange_rates.append(rate)
-    
-    exchange_rates = pd.Series(exchange_rates, index=data.index)
-    data[['Open', 'High', 'Low', 'Close', 'Adj Close']] = data[['Open', 'High', 'Low', 'Close', 'Adj Close']].mul(exchange_rates, axis=0)
-    
-    return data
+def get_sp500_companies():
+    # Get all S&P 500 company symbols from Wikipedia
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    table = pd.read_html(url)
 
-# Read all ticker symbols from the text file
-with open("tickers.txt", "r") as file:
-    all_symbols = file.read().splitlines()
+    # The first table on the page contains the list of S&P 500 companies
+    sp500_table = table[0]
+
+    # So it works with yfinance
+    sp500_symbols = [symbol.replace('.', '-') for symbol in sp500_table['Symbol'].tolist()]
+
+    return sp500_symbols
+
+sp500 = get_sp500_companies()
 
 all_data = []
 processed_companies = []
 
-for comp in all_symbols:
+for comp in sp500:
     print(f"Processing {comp}...")
-    data = {} 
+    data = {}
     basics = get_company_basics(comp)
     for key in basics:
         data[key] = basics[key]
+
+    if 'longName' in basics:
+        processed_companies.append(f"{comp} - {basics['longName']}")
+    else:
         processed_companies.append(comp)
     
     history = get_company_history(comp)
-    
-    if 'currency' in basics:
-        currency = basics['currency']
-    else:
-        currency = 'USD'
-    
-    history_df = pd.DataFrame.from_dict(history, orient='index')
-    history_converted = convert_to_usd(history_df, currency)
-    history = history_converted.to_dict(orient='index')
 
-    for key in history:
-        data[key] = history[key]
+    #append the stock info for every day of the current company
+    day_Data = []
+    for date in history:
+        day_Data.append(history[date])
+        #add the date in the day's info for reference
+        history[date]['Date'] = date
+    
+    data['data'] = day_Data
     
     all_data.append(data)
 
-with open("all_companies.json", "w") as outfile:
+with open("sp500.json", "w") as outfile:
     json.dump(all_data, outfile, indent=4)
 
 end_time = time.time()
 print(f"Finished in {round(end_time-start_time, 1)} seconds")
 
 # Print the list of processed companies
-print("\nList of processed companies:")
-print(processed_companies)
-print(len(processed_companies))
+print(len(processed_companies), "    companies Processed")
