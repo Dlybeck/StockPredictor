@@ -31,10 +31,10 @@ for company in data:
         practice_labels.append(label)
     
     
-with open("inputs.json", "w") as outfile:
+with open("training_inputs.json", "w") as outfile:
     json.dump(practice_inputs, outfile, indent=4)
     
-with open("labels.json", "w") as outfile:
+with open("training_labels.json", "w") as outfile:
     json.dump(practice_labels, outfile, indent=4)
 
 end_time = time.time()

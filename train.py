@@ -15,7 +15,7 @@ def current_time():
 print(f"{current_time()}: Loading data...")
 
 # Load the data
-with open('inputs.json', 'r') as f:
+with open('training_inputs.json', 'r') as f:
     inputs = json.load(f)
 
 # Convert the input data to a NumPy array
@@ -31,7 +31,7 @@ def convert_to_array(data):
 inputs = convert_to_array(inputs)
 
 # Load the labels directly from the JSON file
-with open('labels.json', 'r') as f:
+with open('training_labels.json', 'r') as f:
     labels = np.array(json.load(f))
 
 print(f"{current_time()}: Data loaded. Normalizing data...")
