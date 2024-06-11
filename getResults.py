@@ -2,9 +2,6 @@ import yfinance as yf
 import json
 from collections import OrderedDict
 import pandas as pd
-import time
-
-start_time = time.time()
 
 def get_company_history(symbol):
     data = yf.download(symbol, start="2000-01-01", progress=False, interval='1wk')
@@ -16,10 +13,21 @@ def get_company_history(symbol):
     # Put recent ones on top of json
     data = OrderedDict(list(data.items()))
     
-    for k, v in data.items():
-        v["Change"] = round(((v["Close"] - v["Open"]) / v["Close"])*100, 3)
-    
     return data
+
+#Get the most recent 100 weeks worth of data for every company
+def get_sp500_companies():
+    # Get all S&P 500 company symbols from Wikipedia
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    table = pd.read_html(url)
+
+    # The first table on the page contains the list of S&P 500 companies
+    sp500_table = table[0]
+
+    # So it works with yfinance
+    sp500_symbols = [symbol.replace('.', '-') for symbol in sp500_table['Symbol'].tolist()]
+
+    return sp500_symbols
 
 def get_company_basics(symbol):
     # Get company info
@@ -37,22 +45,9 @@ def get_company_basics(symbol):
     
     return data
 
-def get_sp500_companies():
-    # Get all S&P 500 company symbols from Wikipedia
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    table = pd.read_html(url)
-
-    # The first table on the page contains the list of S&P 500 companies
-    sp500_table = table[0]
-
-    # So it works with yfinance
-    sp500_symbols = [symbol.replace('.', '-') for symbol in sp500_table['Symbol'].tolist()]
-
-    return sp500_symbols
-
 sp500 = get_sp500_companies()
 
-all_data = []
+all_data = {}
 processed_companies = []
 
 for comp in sp500:
@@ -70,23 +65,20 @@ for comp in sp500:
     history = get_company_history(comp)
 
     #append the stock info for every week of the current company
+    counter = 0
     day_Data = []
     
-    #Add date to the data
+    #Add date to the data for the most recent 100 weeks
     for date in history: 
-        day_Data.append(history[date])
-        #add the date in the day's info for reference
-        #history[date]['Date'] = date
+        if(counter < 100):
+            day_Data.append(history[date])
+            #add the date in the day's info for reference
+            #history[date]['Date'] = date
+            counter += 1
     
     data['data'] = day_Data
     
-    all_data.append(data)
+    all_data[basics['symbol']] = data
 
-with open("sp500.json", "w") as outfile:
+with open("100weeks.json", "w") as outfile:
     json.dump(all_data, outfile, indent=4)
-
-end_time = time.time()
-print(f"Finished in {round(end_time-start_time, 1)} seconds")
-
-# Print the list of processed companies
-print(len(processed_companies), "    companies Processed")

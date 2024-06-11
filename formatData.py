@@ -11,18 +11,21 @@ practice_labels = []
 
 #Go through every company
 for company in data:
+    print("Processing ", company['symbol'])
     all_days = company['data']
     
-    #excluding the last 504 days, create an input for each range of days (sliding window method)
-    for i in range(0, len(all_days)-(504+5)):
+    #excluding the last 100 weeks, create an input for each range of days (sliding window method)
+    #Slide window over by 1 week at a time
+    for i in range(0, len(all_days)-(100+4), 2):
         #add to this input
         input = []
-        for j in range(i, i+504):
+        for j in range(i, i+100):
+            all_days[j].pop('Change', None)
             input.append(all_days[j])
         
         label = []
-        for j in range(i+504, i+504+5):
-            label.append(all_days[j])
+        for j in range(i+100, i+100+4):
+            label.append(all_days[j]['Change'])
             
         practice_inputs.append(input)
         practice_labels.append(label)

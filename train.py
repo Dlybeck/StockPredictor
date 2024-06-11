@@ -1,129 +1,95 @@
-import torch
 import json
-from torch.utils.data import Dataset, DataLoader
-import torch.nn as nn
-import torch.optim as optim
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
 import time
 
-# Custom Dataset class to handle data loading from JSON files
-class StockDataset(Dataset):
-    def __init__(self, input_file, label_file, chunk_size=1000):
-        self.input_file = input_file
-        self.label_file = label_file
-        self.chunk_size = chunk_size
+# Function to print current time for better tracking
+def current_time():
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
-    def load_json_chunk(self, file, start_idx, end_idx):
-        with open(file) as f:
-            f.seek(start_idx)
-            data = []
-            while f.tell() < end_idx:
-                line = f.readline()
-                if not line:
-                    break
-                data.append(json.loads(line))
-        return data
+print(f"{current_time()}: Loading data...")
 
-    def __len__(self):
-        with open(self.input_file) as f:
-            num_lines = sum(1 for line in f)
-        return num_lines // self.chunk_size
+# Load the data
+with open('inputs.json', 'r') as f:
+    inputs = json.load(f)
 
-    def __getitem__(self, idx):
-        start_idx = idx * self.chunk_size
-        end_idx = (idx + 1) * self.chunk_size
-        print(f"Loading chunk [{start_idx}:{end_idx}]")
-        inputs = self.load_json_chunk(self.input_file, start_idx, end_idx)
-        labels = self.load_json_chunk(self.label_file, start_idx, end_idx)
-        print(f"Loaded inputs: {len(inputs)} samples, Loaded labels: {len(labels)} samples")
-        return torch.tensor(inputs, dtype=torch.float32), torch.tensor(labels, dtype=torch.float32)
+# Convert the input data to a NumPy array
+def convert_to_array(data):
+    numeric_data = []
+    for sample in data:
+        numeric_sample = []
+        for entry in sample:
+            numeric_sample.append([entry['Open'], entry['High'], entry['Low'], entry['Close'], entry['Adj Close'], entry['Volume']])
+        numeric_data.append(numeric_sample)
+    return np.array(numeric_data)
 
+inputs = convert_to_array(inputs)
 
-class StockPredictor(nn.Module):
-    def __init__(self, num_features):
-        super(StockPredictor, self).__init__()
-        self.lstm = nn.LSTM(input_size=num_features, hidden_size=50, batch_first=True)
-        self.fc = nn.Linear(50, 5)
+# Load the labels directly from the JSON file
+with open('labels.json', 'r') as f:
+    labels = np.array(json.load(f))
 
-    def forward(self, x):
-        _, (hn, _) = self.lstm(x)
-        out = self.fc(hn[-1])
-        return out
+print(f"{current_time()}: Data loaded. Normalizing data...")
 
-def train_model(model, data_loader, criterion, optimizer, num_epochs, grad_accum_steps):
-    model.train()
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        optimizer.zero_grad()
-        
-        for i, (inputs, labels) in enumerate(data_loader):
-            inputs, labels = inputs.cuda(), labels.cuda()  # Move to GPU
+# Normalize the data
+scaler = MinMaxScaler()
+inputs = inputs.reshape(-1, inputs.shape[-1])
+inputs = scaler.fit_transform(inputs)
+inputs = inputs.reshape(-1, 100, inputs.shape[-1])  # 100 time steps
 
-            # Forward pass
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
-            # Backward pass and optimize
-            loss.backward()
+print(f"{current_time()}: Splitting data into training and testing sets...")
 
-            if (i + 1) % grad_accum_steps == 0:  # Gradient accumulation
-                optimizer.step()
-                optimizer.zero_grad()
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(inputs, labels, test_size=0.2, random_state=42)
 
-            running_loss += loss.item()
+print(f"{current_time()}: Defining the LSTM model...")
 
-            if (i + 1) % 100 == 0:  # Print every 100 batches
-                print(f"Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(data_loader)}], Loss: {running_loss / 100:.4f}")
-                running_loss = 0.0
+# Define the LSTM model
+model = tf.keras.models.Sequential([
+    tf.keras.layers.LSTM(50, input_shape=(100, 6), return_sequences=True),  # Input shape: (time_steps, features)
+    tf.keras.layers.LSTM(50, return_sequences=False),
+    tf.keras.layers.Dense(4)  # Output shape: (batch_size, 4) assuming 4 target values per time step
+])
 
-        torch.cuda.empty_cache()  # Clear cache at the end of each epoch
+print(f"{current_time()}: Compiling the model...")
 
-def estimate_training_time(data_loader, model, criterion, optimizer, num_test_batches=100):
-    model.train()
-    start_time = time.time()
+# Compile the model
+model.compile(optimizer=Adam(learning_rate=0.0000005), loss='binary_crossentropy')
 
-    for i, (inputs, labels) in enumerate(data_loader):
-        if i >= num_test_batches:
-            break
-        inputs, labels = inputs.cuda(), labels.cuda()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+# Set up early stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=6, restore_best_weights=True)
 
-    end_time = time.time()
-    time_per_batch = (end_time - start_time) / num_test_batches
-    return time_per_batch
+print(f"{current_time()}: Starting training...")
 
-if __name__ == "__main__":
-    input_file = 'inputs.json'
-    label_file = 'labels.json'
-    
-    batch_size = 16  # Reduce batch size to mitigate memory issues
-    chunk_size = 1000  # Number of lines to read from each file per chunk
-    num_features = 5  # Number of input features
-    grad_accum_steps = 4  # Number of steps to accumulate gradients
+# Set up GPU support if available
+if tf.config.list_physical_devices('GPU'):
+    print("Using GPU")
+    physical_devices = tf.config.list_physical_devices('GPU')
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+else:
+    print("Not using GPU")
 
-    # Model
-    model = StockPredictor(num_features)
-    model = model.cuda()  # Move model to GPU
+# Train the model
+history = model.fit(X_train, y_train, epochs=100, batch_size=32, validation_data=(X_test, y_test), verbose=1, callbacks=[early_stopping])
 
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+print(f"{current_time()}: Training completed. Saving the model...")
 
-    # Estimate training time per epoch using the first chunk
-    dataset = StockDataset(input_file, label_file, chunk_size=chunk_size)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    time_per_batch = estimate_training_time(data_loader, model, criterion, optimizer)
-    full_steps_per_epoch = len(dataset)
-    estimated_time_per_epoch = time_per_batch * full_steps_per_epoch
-    total_epochs = 10
-    total_time = estimated_time_per_epoch * total_epochs
+# Save the model
+model.save('stock_lstm_model.h5')
 
-    print(f"Estimated time per epoch: {estimated_time_per_epoch:.2f} seconds")
-    print(f"Estimated total training time for {total_epochs} epochs: {total_time / 3600:.2f} hours")
+print(f"{current_time()}: Model saved. Plotting training history...")
 
-    # Train model over all chunks
-    num_epochs = 10
+# Plot training history
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Test Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
 
-    for epoch in range(num_epochs):
-        train_model(model, data_loader, criterion, optimizer, 1, grad_accum_steps)
+print(f"{current_time()}: Training history plotted.")
