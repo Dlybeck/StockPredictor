@@ -11,7 +11,7 @@ def get_company_history(symbol):
     data = data.to_dict(orient='index')
     
     # Put recent ones on top of json
-    data = OrderedDict(list(data.items()))
+    data = OrderedDict(reversed(list(data.items())))
     
     return data
 
@@ -54,8 +54,8 @@ for comp in sp500:
     print(f"Processing {comp}...")
     data = {}
     basics = get_company_basics(comp)
-    for key in basics:
-        data[key] = basics[key]
+        
+    data['longName'] = basics['longName']
 
     if 'longName' in basics:
         processed_companies.append(f"{comp} - {basics['longName']}")
