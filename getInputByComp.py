@@ -41,7 +41,7 @@ def get_company_basics(symbol):
         if key in to_keep:
             all_data[key] = info[key]
     
-    data = OrderedDict(reversed(list(all_data.items())))
+    data = OrderedDict(list(all_data.items()))
     
     return data
 
@@ -76,7 +76,8 @@ for comp in sp500:
             #history[date]['Date'] = date
             counter += 1
     
-    data['data'] = day_Data
+    #Reversed so the oldest date of the 100 weeks is on top
+    data['data'] = list(reversed(day_Data))
     
     all_data[basics['symbol']] = data
 
