@@ -1,16 +1,14 @@
 import json
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, LSTM, BatchNormalization, Flatten, Dense, Input
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import time
-
-# Check if GPU is available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using {device} device")
 
 # Function to print current time for better tracking
 def current_time():
@@ -42,106 +40,74 @@ print(f"{current_time()}: Data loaded. Normalizing data...")
 
 # Normalize the data
 scaler = MinMaxScaler()
-inputs = inputs.reshape(-1, inputs.shape[-1])
-inputs = scaler.fit_transform(inputs)
-inputs = inputs.reshape(-1, 100, inputs.shape[-1])  # 100 time steps
+inputs_reshaped = inputs.reshape(-1, inputs.shape[-1])
+inputs_scaled = scaler.fit_transform(inputs_reshaped)
+inputs = inputs_scaled.reshape(-1, 104, 6)  # 104 time steps, 6 features
+
+# Normalize the labels
+scaler_labels = MinMaxScaler()
+labels_reshaped = labels.reshape(-1, labels.shape[-1])
+labels_scaled = scaler_labels.fit_transform(labels_reshaped)
+labels = labels_scaled.reshape(-1, 4)  # 4 target values
+
+
+# Print shapes for debugging
+print(f"Inputs shape: {inputs.shape}, Labels shape: {labels.shape}")
 
 print(f"{current_time()}: Splitting data into training and testing sets...")
 
 # Split the data into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(inputs, labels, test_size=0.2, random_state=42)
 
-print(f"{current_time()}: Converting data to PyTorch tensors...")
+print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+print(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
 
-# Convert data to PyTorch tensors
-X_train = torch.from_numpy(X_train).float().to(device)
-X_test = torch.from_numpy(X_test).float().to(device)
-y_train = torch.from_numpy(y_train).float().to(device)
-y_test = torch.from_numpy(y_test).float().to(device)
+print(f"{current_time()}: Defining the Conv1D + LSTM model...")
 
-# Create PyTorch datasets
-train_dataset = TensorDataset(X_train, y_train)
-test_dataset = TensorDataset(X_test, y_test)
+# Define the custom loss function
+def scaled_mae(y_true, y_pred):
+    mae = tf.keras.losses.MeanAbsoluteError()(y_true, y_pred)
+    return mae * 100
 
-# Create PyTorch data loaders
-train_loader = DataLoader(train_dataset, batch_size=30, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=30, shuffle=False)
-
-print(f"{current_time()}: Defining the LSTM model...")
-
-# Define the improved LSTM model
-class LSTMModel(nn.Module):
-    def __init__(self, input_size=6, hidden_size=50, output_size=4, num_layers=3, dropout=0.5):
-        super(LSTMModel, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-        out, _ = self.lstm(x, (h0, c0))
-        out = self.dropout(out)
-        out = self.fc(out[:, -1, :])
-        return out
-
-model = LSTMModel().to(device)
+# Define the model
+model = Sequential([
+    Input(shape=(104, 6)),
+    LSTM(128, return_sequences=True),
+    BatchNormalization(),
+    LSTM(64, return_sequences=True),
+    BatchNormalization(),
+    LSTM(32),
+    BatchNormalization(),
+    Dense(32, activation='relu'),
+    Dense(4, activation='linear')  # Output layer with 4 units for 4 target values
+])
 
 print(f"{current_time()}: Compiling the model...")
-# Define the loss function and optimizer
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005)
+
+# Summary of the model
+model.summary()
+
+# Compile the model
+model.compile(optimizer=Adam(learning_rate=0.00000075), loss=scaled_mae, metrics=['mae'])
+
+# Set up early stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
 print(f"{current_time()}: Starting training...")
 
-# Training loop
-train_losses = []
-test_losses = []
-for epoch in range(100):
-    start_time = time.time()  # Record start time for the epoch
-    train_loss = 0.0
-    test_loss = 0.0
-
-    # Training loop
-    model.train()
-    for inputs, labels in train_loader:
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        train_loss += loss.item()
-
-    # Validation loop
-    model.eval()
-    with torch.no_grad():
-        for inputs, labels in test_loader:
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            test_loss += loss.item()
-
-    train_loss /= len(train_loader)
-    test_loss /= len(test_loader)
-    train_losses.append(train_loss)
-    test_losses.append(test_loss)
-
-    end_time = time.time()  # Record end time for the epoch
-    epoch_time = end_time - start_time  # Calculate time taken for the epoch
-
-    print(f"Epoch {epoch+1}/{100}, Train Loss: {train_loss:.4f}, Val Loss: {test_loss:.4f}, Time: {epoch_time:.2f}s")
+# Train the model
+history = model.fit(X_train, y_train, epochs=100, batch_size=64, validation_data=(X_test, y_test), verbose=1, callbacks=[early_stopping])
 
 print(f"{current_time()}: Training completed. Saving the model...")
 
 # Save the model
-torch.save(model.state_dict(), 'stock_lstm_model.pth')
+model.save('stock_conv1d_lstm_model3.h5')
 
 print(f"{current_time()}: Model saved. Plotting training history...")
 
 # Plot training history
-plt.plot(train_losses, label='Train Loss')
-plt.plot(test_losses, label='Test Loss')
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 plt.legend()

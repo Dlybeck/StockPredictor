@@ -16,15 +16,15 @@ for company in data:
     
     #excluding the last 100 weeks, create an input for each range of days (sliding window method)
     #Slide window over by 1 week at a time
-    for i in range(0, len(all_days)-(100+4), 2):
+    for i in range(0, len(all_days)-(104+4)):
         #add to this input
         input = []
-        for j in range(i, i+100):
+        for j in range(i, i+104):
             all_days[j].pop('Change', None)
             input.append(all_days[j])
         
         label = []
-        for j in range(i+100, i+100+4):
+        for j in range(i+104, i+104+4):
             label.append(all_days[j]['Change'])
             
         practice_inputs.append(input)
